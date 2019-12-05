@@ -1,1 +1,1 @@
-# wisheryBot
+# wegiv-bot

@@ -1,10 +1,15 @@
 require('dotenv').config();
-const firebase = require('firebase-admin');
 
-firebase.initializeApp({
-    credential: firebase.credential.cert(JSON.parse(process.env.DATABASE_KEY)),
-    databaseURL: process.env.DATABASE_URL
-});
+import * as firebase from 'firebase';
+
+var firebaseConfig = {
+    apiKey: "AIzaSyC5Vd3Ku3d1JUQuQvXGyqPzcj8qoMQppV8",
+    authDomain: "wegiv-bot.firebaseapp.com",
+    databaseURL: "https://wegiv-bot.firebaseio.com",
+    projectId: "wegiv-bot",
+    storageBucket: "wegiv-bot.appspot.com",
+};
+var app = firebase.initializeApp(firebaseConfig);
 
 module.exports = {
     getData(path) {
@@ -14,7 +19,7 @@ module.exports = {
     },
     pushData(path, data) {
         return firebase.database().ref(path).push(data).then(data => {
-            return (data.path.pieces_)
+            return ((data as any).path.pieces_)
         });
     },
     setData(path, data) {

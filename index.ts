@@ -1,222 +1,90 @@
 import * as TelegramBot from 'node-telegram-bot-api';
-import { add_time, cancelKey, defaultKeyboard, homeKeyboard, tagsKeyboard } from './assets/keyboard'
-import { homeBtn, new_wish } from './assets/keyboard-buttons'
+import {
+    addParticipant,
+    clearParticipants,
+    getParticipants,
+    getParticipateButton,
+    getRaffleId,
+    saveRaffleMsg,
+    updateUser
+} from "./assets/helpers";
 
 require('dotenv').config();
-const frases = require('./assets/frases');
-// const bot = new TelegramBot(process.env.TOKEN, {polling: true})
-const bot = new TelegramBot(process.env.TOKEN, {webHook: {port: +process.env.PORT}})
-bot.setWebHook(`${process.env.URL}/bot${process.env.TOKEN}`).catch(e => console.error(e));
-const helpers = require('./assets/helpers');
-const cache = require('memory-cache');
-const tagsList = require('./assets/tags').tags;
+const frases = require('./assets/frases.json');
+const groups = require('./assets/groups.json');
+const bot = new TelegramBot(process.env.TOKEN, {polling: true})
+// const bot = new TelegramBot(process.env.TOKEN, {webHook: {port: +process.env.PORT}})
+// bot.setWebHook(`${process.env.URL}/bot${process.env.TOKEN}`).catch(e => console.error(e));
+// bot.setWebHook(`${process.env.URL}/bot${process.env.TOKEN}`).catch(e => console.error(e));
+
+const groupId = -1001392541080;
 
 
-bot.onText(/\/start/, (msg) => {
-    helpers.updateUser(msg.chat.id, {...msg.from, tags: tagsList.map(({code}) => code)});
-    bot.sendMessage(msg.chat.id, frases.description, defaultKeyboard).then(() => {
-        bot.sendMessage(msg.chat.id, frases.welcome, homeKeyboard);
-    });
+bot.onText(/\/start/, ({chat: {id}, from}) => {
+    updateUser(id, from);
+    bot.sendMessage(id, frases.help)
 });
 
-bot.onText(/\/home/, (msg) => {
-    goHome(msg.chat.id)
+bot.onText(/\/id/, (msg) => {
+    bot.sendMessage(msg.chat.id, String(msg.chat.id))
+});
+bot.onText(/\/help/, ({chat: {id}}) => {
+    bot.sendMessage(id, frases.help)
 });
 
-function goHome(id: string | number): Promise<TelegramBot.Message> {
-    cache.del(id);
-    return bot.sendMessage(id, frases.welcome, homeKeyboard)
+bot.onText(/\/choose/, () => chooseWinner());
+
+async function chooseWinner() {
+    const participants = await getParticipants();
+    if (!participants) return
+    const randomValue = Math.floor(1 + Math.random() * ((+Object.keys(participants).length) + 1 - 1)) - 1;
+    const winner = Object.values(participants)[randomValue];
+    bot.sendMessage(groupId, `Победил <a href="tg://user?id=${winner.id}">${winner.first_name}</a>`, {parse_mode: "HTML"})
+
 }
 
-bot.onText(/\/test/, (msg) => {
-    helpers.getUsers().then(users => {
-        Object.keys(users).map(id => {
-            helpers.updateUser(id, {...users[id], tags: []})
-        })
-    })
+bot.onText(/\/count/, ({chat: {id}}) =>
+    getParticipants().then(v => bot.sendMessage(id, String(v ? Object.keys(v).length : 0)))
+);
+
+bot.onText(/\/create /, ({chat: {id}, from, photo}, match) =>
+    createAndSendPost(id, match.input.replace('/create ', ''))
+);
+
+async function createAndSendPost(id: number, caption: string) {
+    await clearParticipants();
+    const btn = await getParticipateButton();
+    // photo
+    // ? bot.sendPhoto(id, , {caption, ...btn })
+    // :
+    const msg = await bot.sendMessage(groupId, caption, btn);
+    await saveRaffleMsg(msg)
+}
+
+
+bot.on('callback_query', (q) => {
+    console.log(q)
+    if (q.data === 'newParticipant') checkAndAddNewParticipantPost(q)
 });
 
 
-bot.on('message', (msg) => {
-    try {
-        const chatId = msg.chat.id;
-        let cacheData = cache.get(chatId);
-        if (msg.text === homeBtn.text) {
-            goHome(chatId)
-        } else if (msg.text === new_wish.text) {
-            cache.del(msg.chat.id);
-            cache.put(msg.chat.id, {payload: {}, state: 'ADD_TITLE'});
-            bot.sendMessage(msg.chat.id, frases.add_title);
-        } else if (cacheData != null) {
-            if (cacheData.state === 'ADD_TITLE') {
-                cache.put(chatId, {payload: {title: msg.text}, state: 'ADD_TIME'});
-                bot.sendMessage(chatId, frases.add_time, add_time()).catch(e => console.error(e));
+async function checkAndAddNewParticipantPost({from, message: {chat: {id: chat_id}, message_id}}: TelegramBot.CallbackQuery) {
+    const list = [groupId, ...groups.map(({id}): number => id)];
+    const isMember = (await Promise.all(list.map(async (id) => {
+            try {
+                return await bot.getChatMember(id, String(from.id))
+            } catch (e) {
+                return null
             }
         }
-    } catch (e) {
-        console.error(e)
-    }
-});
-
-
-bot.on('callback_query', function (query) {
-    try {
-        const chat = query.message.chat;
-        const message_id = query.message.message_id + '';
-        const cacheData = cache.get(chat.id);
-
-        console.log(query.data);
-        console.log(cacheData);
-
-        const data = helpers.unmarshal(query.data);
-
-
-        switch (data.state) {
-            case 'TAGS':
-                const tags = Array.isArray(cacheData.payload.tags) ? cacheData.payload.tags : [];
-                const index = tags.indexOf(data.payload);
-                index === -1 ? tags.push(data.payload) : tags.splice(index, 1);
-
-                bot.sendMessage(chat.id, frases.settings_tags, tagsKeyboard(tags, data.state))
-                    .then(() => bot.deleteMessage(chat.id, message_id));
-                cache.put(chat.id, {state: cacheData.state, payload: {...cacheData.payload, tags}});
-                break;
-            case 'SUBMIT_TAGS':
-                if (cacheData.state === 'SETTINGS') {
-                    helpers.updateUser(chat.id, {tags: cacheData.payload.tags});
-                    bot.sendMessage(chat.id, frases.success_tags, homeKeyboard)
-                        .then(() => bot.deleteMessage(chat.id, message_id));
-                    cache.del(chat.id);
-                } else if (cacheData.state === 'ADD') {
-                    helpers.addWish({...cacheData.payload, user_id: chat.id, username: chat.first_name});
-                    cache.del(chat.id);
-                    bot.sendMessage(chat.id, frases.add_success, homeKeyboard)
-                        .then(() => bot.deleteMessage(chat.id, message_id));
-
-                    helpers.getUsers().then(users => {
-                        Object.keys(users).map(id => {
-                            const userTags = users[id].tags || [];
-                            const wishTags = cacheData.payload.tags || [];
-                            const matches = userTags.filter((obj) => wishTags.indexOf(obj) >= 0);
-                            if (matches.length > 0 && +id !== chat.id) {
-                                bot.sendMessage(id, `<a href="tg://user?id=${chat.id}">${(chat.username || 'Пользователь')}</a> ` +
-                                    `хочет ${cacheData.payload.title} в ${helpers.getTime(cacheData.payload.time)}`, {parse_mode: 'HTML'}).catch(e => {
-                                        console.log(`user ${users[id].first_name} ${id}`)
-                                })
-                            }
-                        })
-                    })
-                }
-                break;
-
-
-
-            //===========ADD==============\\
-            case 'ADD_TIME':
-                helpers.getUser(chat.id).then(user => {
-                    cache.put(chat.id, {
-                        payload: {...cacheData.payload, time: data.payload, tags: user.tags},
-                        state: 'ADD'
-                    });
-                    bot.sendMessage(chat.id, frases.settings_tags, tagsKeyboard(user.tags, 'TAGS'))
-                        .then(() => bot.deleteMessage(chat.id, message_id));
-                });
-                break;
-            //===========HOME==============\\
-            case 'NEW_WISH':
-                cache.put(chat.id, {payload: {}, state: 'ADD_TITLE'});
-                bot.sendMessage(chat.id, frases.add_title).then(() => bot.deleteMessage(chat.id, message_id));
-                break;
-            case 'GO_HOME':
-                goHome(chat.id).then(() => {
-                    bot.deleteMessage(chat.id, message_id);
-                });;
-                break;
-            case 'FEEDBACK':
-                bot.sendMessage(chat.id, frases.feedback);
-                break;
-            case 'OPEN_SETTINGS':
-                helpers.getUser(chat.id).then(user => {
-                    const tags = user.tags || [];
-                    bot.sendMessage(chat.id, frases.settings_tags, tagsKeyboard(tags, 'TAGS'));
-                    cache.put(chat.id, {payload: {tags}, state: 'SETTINGS'});
-                }).then(() => bot.deleteMessage(chat.id, message_id));
-                break;
-            case 'MY_WISHES':
-
-                helpers.getWishes(chat.id).then(data => {
-                    let text = '';
-                    const keys = Object.keys(data);
-                    for (let wish in keys) {
-                        if (text.length >= 3000) {
-                            bot.sendMessage(chat.id, text, {parse_mode: 'HTML'});
-                            text = '\n'
-                        } else {
-                            text += `<a href="tg://user?id=${data[wish].user_id}">${(data[wish].username || 'Пользователь')}</a> ` +
-                                `хочет ${data[wish].title} в ${helpers.getTime(data[wish].time)}` + '\n\n'
-                        }
-                    }
-                    bot.sendMessage(chat.id, text === '' ? 'Список пуст' : text, {parse_mode: 'HTML', ...homeKeyboard})
-                        .then(() => bot.deleteMessage(chat.id, message_id));
-                });
-
-                break;
-            case 'FIND_WISHES':
-                helpers.getUser(chat.id).then(user => {
-                    // user.tags
-                    helpers.getWishes().then(data => {
-                        let text = '';
-                        const keys = Object.keys(data);
-                        for (let wish in keys) {
-                            if (data[wish].user_id === user.user_id) continue;
-                            if (text.length >= 3000) {
-                                bot.sendMessage(chat.id, text, {parse_mode: 'HTML'});
-                                text = '\n'
-                            } else {
-                                text += `<a href="tg://user?id=${data[wish].user_id}">${(data[wish].username || 'Пользователь')}</a> ` +
-                                    `хочет ${data[wish].title} в ${helpers.getTime(data[wish].time)}` + '\n\n'
-                            }
-                        }
-                        bot.sendMessage(chat.id, text === '' ? 'Список пуст' : text, {parse_mode: 'HTML', ...homeKeyboard})
-                            .then(() => bot.deleteMessage(chat.id, message_id));
-                    });
-                });
-
-                break;
-            case 'CANCEL_WISHES':
-                helpers.getWishes(chat.id).then(data => {
-                    const keyBoard = data ? cancelKey(data) : [];
-                    bot.sendMessage(
-                        chat.id,
-                        keyBoard.length === 0 ? 'Список пуст' : frases.cancel_wish,
-                        {reply_markup: {inline_keyboard: keyBoard}}
-                    ).then(() => {
-                        bot.deleteMessage(chat.id, message_id);
-                    });
-                });
-                break;
-            case 'CANCEL_WISH':
-                helpers.cancelWish(data.payload);
-                helpers.getWishes(chat.id).then(data => {
-                    const keyBoard = data ? cancelKey(data) : [];
-                    bot.sendMessage(
-                        chat.id,
-                        keyBoard.length === 0 ? 'Список пуст' : frases.cancel_wish,
-                        {reply_markup: {inline_keyboard: keyBoard}}
-                    ).then(() => {
-                        bot.deleteMessage(chat.id, message_id);
-                    });
-                });
-                break;
-        }
-        if (cacheData != null) {
-        }
-
-    } catch (e) {
-        console.log(e)
-    }
-
-})
-
+    ))).every((val: { status: string } | null) => val && val.status === 'member');
+    if (!isMember) return;
+    const raffle_id = await getRaffleId()
+    if (raffle_id !== message_id) return;
+    await addParticipant(from.id, from);
+    const btn = await getParticipateButton();
+    bot.editMessageReplyMarkup(btn.reply_markup, {message_id: raffle_id, chat_id}).catch(e => {
+    })
+}
 
 console.log('Bot has been started ✅ ');

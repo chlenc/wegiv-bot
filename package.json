@@ -1,5 +1,5 @@
 {
-  "name": "wisherybot",
+  "name": "waves_bot",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -9,26 +9,21 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/chlenc/wisheryBot.git"
+    "url": ""
   },
   "author": "chlenc",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/chlenc/wisheryBot/issues"
+    "url": ""
   },
-  "homepage": "https://github.com/chlenc/wisheryBot#readme",
+  "homepage": "",
   "dependencies": {
     "@types/node-telegram-bot-api": "^0.31.0",
     "dotenv": "^7.0.0",
-    "firebase-admin": "^7.2.0",
+    "firebase": "^7.5.0",
     "memory-cache": "^0.2.0",
     "node-telegram-bot-api": "^0.30.0",
-    "ts-loader": "^6.0.2",
     "ts-node": "^8.2.0",
-    "typescript": "^3.5.1",
-    "webpack": "^4.33.0"
-  },
-  "devDependencies": {
-    "webpack-cli": "^3.3.4"
+    "typescript": "^3.5.1"
   }
 }
