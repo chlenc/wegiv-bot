@@ -1,4 +1,5 @@
 import * as TelegramBot from 'node-telegram-bot-api';
+import axios from 'axios';
 import {
     addParticipant,
     clearParticipants,
@@ -47,24 +48,42 @@ bot.onText(/\/count/, ({chat: {id}}) =>
     getParticipants().then(v => bot.sendMessage(id, String(v ? Object.keys(v).length : 0)))
 );
 
-bot.onText(/\/create /, ({chat: {id}, from, photo}, match) =>
-    createAndSendPost(id, match.input.replace('/create ', ''))
+bot.onText(/\/create /, (msg, match) => {
+        console.log('create')
+        createAndSendPost(msg.chat.id, match.input.replace('/create ', '')).catch(() => {
+            bot.sendMessage(msg.chat.id, 'error')
+        })
+    }
 );
 
-async function createAndSendPost(id: number, caption: string) {
+async function createAndSendPost(id: number, caption: string, file_id?: string) {
     await clearParticipants();
     const btn = await getParticipateButton();
-    // photo
-    // ? bot.sendPhoto(id, , {caption, ...btn })
-    // :
-    const msg = await bot.sendMessage(groupId, caption, btn);
+    let msg = null;
+    if (file_id) {
+        msg = await (bot as any).sendPhoto(groupId, file_id, {caption, ...btn, parse_mode: 'Markdown'})
+    } else {
+        msg = await bot.sendMessage(groupId, caption, {...btn, parse_mode: 'Markdown'});
+    }
+
     await saveRaffleMsg(msg)
 }
 
 
 bot.on('callback_query', (q) => {
-    console.log(q)
     if (q.data === 'newParticipant') checkAndAddNewParticipantPost(q)
+});
+
+
+bot.on('message', (msg) => {
+    if (msg.photo && (/\/create /).test(msg.caption)) {
+        createAndSendPost(
+            msg.chat.id,
+            msg.caption.replace('/create ', ''),
+            msg.photo.pop().file_id
+        )
+    }
+
 });
 
 

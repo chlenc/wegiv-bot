@@ -1,5 +1,6 @@
 {
-  "help": "/start - начать работу\n/numberOfParticipants - Количество участнков\n/create - создать пост\n/chooseWinner - выбрать победителя\n/help - помощь\n/id - узнать свой id"
+  "help": "Бот потдерживает следующие команды\n- /start - начать работу\n\n- /numberOfParticipants - Количество участнков\n\n- /chooseWinner - выбрать победителя\n\n- /help - помощь\n\n- /id - узнать свой id\n\n- /create <text> - создать пост\n    Бот поддерживает markdown.\n    Пример:\n    - *bold text*\n    - _italic text_\n    - [inline URL](http://www.example.com/)\n    - [user URL](tg://user?id=280914417)"
+
 
 
 }
