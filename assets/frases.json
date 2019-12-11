@@ -1,5 +1,6 @@
 {
-  "help": "Бот потдерживает следующие команды\n- /start - начать работу\n\n- /numberOfParticipants - Количество участнков\n\n- /chooseWinner - выбрать победителя\n\n- /help - помощь\n\n- /id - узнать свой id\n\n- /create <text> - создать пост\n    Бот поддерживает markdown.\n    Пример:\n    - *bold text*\n    - _italic text_\n    - [inline URL](http://www.example.com/)\n    - [user URL](tg://user?id=280914417)"
+  "help": " Commands\n\n /start - Начать работу\n\n /newadmin <id>  - Добавить нового админа\n\n /dropadmin <id>  - Удалить админа\n\n /count - Количество участнков\n\n /create <text> - создать пост\n Бот поддерживает markdown.\n Пример:\n - *bold text*\n - _italic text_\n - [inline URL](http://www.example.com/)\n - [user URL](tg://user?id=280914417)\n\n /choose <count> - Выбрать победителя\n\n /help - Помощь\n\n /kill - Погубить текущий розигрыш\n\n /id - Узнать свой id\n\n /setMainGroup <id>  - Установить группу в которой проводится розигрыш\n\n /setGroups <LIST>  - Установить группуы, на которые надо подписаться\n Пример: [-1001392541080,-1001392541081]"
+
 
 
 

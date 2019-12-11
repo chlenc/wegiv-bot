@@ -1,24 +1,59 @@
 import * as TelegramBot from 'node-telegram-bot-api';
-import axios from 'axios';
 import {
     addParticipant,
+    changeGroupsList,
+    changeMainGroupId,
     clearParticipants,
+    dropAdmin, getGroupsList,
+    getMainGroupId,
     getParticipants,
     getParticipateButton,
     getRaffleId,
+    isAdmin,
+    newAdmin,
     saveRaffleMsg,
     updateUser
 } from "./assets/helpers";
-
+//todo fix
 require('dotenv').config();
 const frases = require('./assets/frases.json');
-const groups = require('./assets/groups.json');
 const bot = new TelegramBot(process.env.TOKEN, {polling: true})
-// const bot = new TelegramBot(process.env.TOKEN, {webHook: {port: +process.env.PORT}})
-// bot.setWebHook(`${process.env.URL}/bot${process.env.TOKEN}`).catch(e => console.error(e));
-// bot.setWebHook(`${process.env.URL}/bot${process.env.TOKEN}`).catch(e => console.error(e));
 
-const groupId = -1001392541080;
+
+/**
+ Commands
+
+ /start - Начать работу
+
+ /newadmin <id>  - Добавить нового админа
+
+ /dropadmin <id>  - Удалить админа
+
+ /count - Количество участнков
+
+ /create <text> - создать пост
+ Бот поддерживает markdown.
+ Пример:
+ - *bold text*
+ - _italic text_
+ - [inline URL](http://www.example.com/)
+ - [user URL](tg://user?id=280914417)
+
+ /choose <count> - Выбрать победителя
+
+ /help - Помощь
+
+ /kill - Погубить текущий розигрыш
+
+ /id - Узнать свой id
+
+ /setMainGroup <id>  - Установить группу в которой проводится розигрыш
+
+ /setGroups <LIST>  - Установить группуы, на которые надо подписаться
+ Пример: [-1001392541080,-1001392541081]
+
+ */
+
 
 
 bot.onText(/\/start/, ({chat: {id}, from}) => {
@@ -26,37 +61,133 @@ bot.onText(/\/start/, ({chat: {id}, from}) => {
     bot.sendMessage(id, frases.help)
 });
 
-bot.onText(/\/id/, (msg) => {
-    bot.sendMessage(msg.chat.id, String(msg.chat.id))
+bot.onText(/\/newadmin (\d+)/, (msg, match) => addAdmin(msg, match));
+
+bot.onText(/\/dropadmin (\d+)/, (msg, match) => deleteAdmin(msg, match));
+
+bot.onText(/\/count/, ({chat: {id}}) => {
+    getParticipants().then(v => bot.sendMessage(id, String(v ? Object.keys(v).length : 0)))
 });
+
+bot.onText(/\/create /, (msg, match) => {
+    createAndSendPost(msg.chat.id, match.input.replace('/create ', '')).catch(() => {
+        bot.sendMessage(msg.chat.id, 'error')
+    })
+});
+
+bot.onText(/\/choose (\d+)/, (msg, match) => chooseWinner(msg, match));
+
 bot.onText(/\/help/, ({chat: {id}}) => {
     bot.sendMessage(id, frases.help)
 });
 
-bot.onText(/\/choose/, () => chooseWinner());
+bot.onText(/\/kill/, ({chat: {id: chat_id}, from}) => {
+    (async () => {
+        if (!(await adminCheck(from.id))) return;
+        const raffleId = await getRaffleId();
+        await bot.editMessageReplyMarkup({inline_keyboard: [[{text: `Конкурс завершен`, callback_data: 'done'}]]},
+            {message_id: raffleId, chat_id}).catch(e => process.stdout.write(e))
+    })()
+});
 
-async function chooseWinner() {
+bot.onText(/\/id/, (msg) => {
+    bot.sendMessage(msg.chat.id, String(msg.chat.id))
+});
+
+bot.onText(/\/setMainGroup /, (msg, match) => (async () => {
+    if (!(await adminCheck(msg.from.id))) return;
+    let success = true
+    const num = match.input.replace('/setMainGroup ', '')
+    if (!isNaN(+num)) {
+        await bot.getChat(num)
+            .then(async () => await changeMainGroupId(num))
+            .catch(() => {
+                success = false
+            });
+    }
+    await bot.sendMessage(msg.chat.id, success ? 'success' : 'error')
+})());
+
+bot.onText(/\/setGroups /, (msg, match) => (async () => {
+    if (!(await adminCheck(msg.from.id))) return;
+    let success = true
+    try {
+        const body = (match.input.replace('/setGroups ', ''));
+        const arr = JSON.parse(body);
+        if (Array.isArray(arr)) {
+            for (const group of arr) {
+                if (isNaN(+group)) throw 'error';
+                await bot.getChat(group)
+            }
+        }
+        if (success) await changeGroupsList(arr)
+    } catch (e) {
+        success = false
+    }
+    await bot.sendMessage(msg.chat.id, success ? 'success' : 'error')
+})());
+
+
+//functions
+async function chooseWinner(msg: TelegramBot.Message, match) {
+    if (!(await adminCheck(msg.from.id))) return;
+
+    const groupId = await getMainGroupId();
+    if (!groupId || isNaN(+groupId)) return;
+
+    const groups = await getGroupsList();
+    if (!groups && groups.some(g => isNaN(g))) return;
+
     const participants = await getParticipants();
-    if (!participants) return
-    const randomValue = Math.floor(1 + Math.random() * ((+Object.keys(participants).length) + 1 - 1)) - 1;
-    const winner = Object.values(participants)[randomValue];
-    bot.sendMessage(groupId, `Победил <a href="tg://user?id=${winner.id}">${winner.first_name}</a>`, {parse_mode: "HTML"})
+    if (!participants) return;
+    if (+match[1] <= 0 || Object.keys(participants).length < +match[1]) {
+        await bot.sendMessage(msg.chat.id, 'некорректный ввод');
+        return
+    }
+    const winners: number[] = [];
+    const usersChecked: number[] = [];
+    for (let i = 0; i < match[1]; i++) {
+        const randomValue = Math.floor(1 + Math.random() * ((+Object.keys(participants).length) + 1 - 1)) - 1;
+        !usersChecked.includes(randomValue) && usersChecked.push(randomValue);
+        if (winners.includes(randomValue) || !(await isMember(Object.values(participants)[randomValue].id, +groupId, groups))) {
+            i--
+        } else {
+            winners.push(randomValue)
+        }
+        if (usersChecked.length === Object.keys(participants).length) break;
+    }
+
+    const getUserLink = (id, name) => `<a href="tg://user?id=${id}">${name}</a>`;
+
+    const text = winners.map((i, j) => {
+        const user = Object.values(participants)[i]
+        return `${j + 1}. ${getUserLink(user.id, user.first_name)}`
+    }).join('\n');
+
+    bot.sendMessage(msg.chat.id, `${''}\n${text}`, {parse_mode: "HTML"})
 
 }
 
-bot.onText(/\/count/, ({chat: {id}}) =>
-    getParticipants().then(v => bot.sendMessage(id, String(v ? Object.keys(v).length : 0)))
-);
-
-bot.onText(/\/create /, (msg, match) => {
-        console.log('create')
-        createAndSendPost(msg.chat.id, match.input.replace('/create ', '')).catch(() => {
-            bot.sendMessage(msg.chat.id, 'error')
-        })
+async function addAdmin(msg, match) {
+    if (!(await adminCheck(msg.from.id))) return;
+    if (match[1] && !isNaN(+match[1])) {
+        await newAdmin(match[1])
+        await bot.sendMessage(msg.chat.id, `<a href="tg://user?id=${match[1]}">Admin</a> добавлен`, {parse_mode: "HTML"})
     }
-);
+}
+
+async function deleteAdmin(msg, match) {
+    if (!(await adminCheck(msg.from.id))) return;
+    if (match[1] && !isNaN(+match[1])) {
+        await dropAdmin(match[1]);
+        await bot.sendMessage(msg.chat.id, `<a href="tg://user?id=${match[1]}">Admin</a> удален`, {parse_mode: "HTML"})
+    }
+}
 
 async function createAndSendPost(id: number, caption: string, file_id?: string) {
+    if (!(await adminCheck(id))) return;
+    const groupId = await getMainGroupId();
+    if (!groupId) return;
     await clearParticipants();
     const btn = await getParticipateButton();
     let msg = null;
@@ -69,11 +200,51 @@ async function createAndSendPost(id: number, caption: string, file_id?: string) 
     await saveRaffleMsg(msg)
 }
 
+async function isMember(user_id: number, groupId: number, groups:number[]): Promise<boolean> {
+    const list = [groupId, ...groups];
+    const successStatuses = ['administrator', 'member', 'creator'];
+    return (await Promise.all(list.map(async (id) => {
+            try {
+                return await bot.getChatMember(id, String(user_id))
+            } catch (e) {
+                return null
+            }
+        }
+    ))).every((val: { status: string } | null) => val && successStatuses.includes(val.status));
+}
 
+async function checkAndAddNewParticipant({id, from, message: {chat: {id: chat_id}, message_id}}: TelegramBot.CallbackQuery) {
+    const groupId = await getMainGroupId();
+    if (!groupId || isNaN(+groupId)) return;
+    const groups = await getGroupsList();
+    if (!groups && groups.some(g => isNaN(g))) return;
+    if (!(await isMember(from.id, +groupId, groups))) {
+        await bot.answerCallbackQuery(id, {text: 'error', show_alert: true});
+        return
+    }
+
+    const raffle_id = await getRaffleId()
+    if (raffle_id !== message_id) return;
+    await addParticipant(from.id, from);
+    const btn = await getParticipateButton();
+    await bot.answerCallbackQuery(id, {text: 'success', show_alert: true});
+    await bot.editMessageReplyMarkup(btn.reply_markup, {message_id: raffle_id, chat_id}).catch(e => {
+    })
+}
+
+async function adminCheck(id) {
+    let success = true;
+    if (!(await isAdmin(id))) {
+        await bot.sendMessage(id, 'Вы не админ');
+        success = false
+    }
+    return success
+}
+
+//event listeners
 bot.on('callback_query', (q) => {
-    if (q.data === 'newParticipant') checkAndAddNewParticipantPost(q)
+    if (q.data === 'newParticipant') checkAndAddNewParticipant(q)
 });
-
 
 bot.on('message', (msg) => {
     if (msg.photo && (/\/create /).test(msg.caption)) {
@@ -86,24 +257,4 @@ bot.on('message', (msg) => {
 
 });
 
-
-async function checkAndAddNewParticipantPost({from, message: {chat: {id: chat_id}, message_id}}: TelegramBot.CallbackQuery) {
-    const list = [groupId, ...groups.map(({id}): number => id)];
-    const isMember = (await Promise.all(list.map(async (id) => {
-            try {
-                return await bot.getChatMember(id, String(from.id))
-            } catch (e) {
-                return null
-            }
-        }
-    ))).every((val: { status: string } | null) => val && val.status === 'member');
-    if (!isMember) return;
-    const raffle_id = await getRaffleId()
-    if (raffle_id !== message_id) return;
-    await addParticipant(from.id, from);
-    const btn = await getParticipateButton();
-    bot.editMessageReplyMarkup(btn.reply_markup, {message_id: raffle_id, chat_id}).catch(e => {
-    })
-}
-
-console.log('Bot has been started ✅ ');
+process.stdout.write('Bot has been started ✅ ');
